@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: smart-code-reviewer
+  datasource:
+    url: jdbc:h2:mem:reviewdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+
+server:
+  port: 8080
+
+# LangChain4j / OpenAI 配置
+langchain4j:
+  open-ai:
+    chat-model:
+      api-key: ${OPENAI_API_KEY:your-api-key-here}
+      model-name: gpt-4o
+      temperature: 0.1
+      max-tokens: 2048
+
+# GitHub Webhook 配置
+app:
+  github:
+    webhook-secret: ${GITHUB_WEBHOOK_SECRET:}
+    token: ${GITHUB_TOKEN:}
