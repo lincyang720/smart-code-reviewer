@@ -26,19 +26,25 @@ public class MultiAgentReviewService {
     private final LogicReviewAgent logicReviewAgent;
     private final PerformanceReviewAgent performanceReviewAgent;
     private final ReportSynthesisAgent reportSynthesisAgent;
+    private final TeamNormsMemory teamNormsMemory;
+    private final ReviewHistoryService reviewHistoryService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ReviewResult review(ReviewRequest request) {
         log.info("开始多Agent审查 PR #{} - {}", request.getPrNumber(), request.getTitle());
 
         ReviewPlan plan = createPlan(request);
-        List<CompletableFuture<AgentReviewResult>> futures = dispatchTasks(plan, request);
+        List<String> retrievedNorms = teamNormsMemory.retrieveRelevantNorms(request.getDiff());
+        List<CompletableFuture<AgentReviewResult>> futures = dispatchTasks(plan, request, retrievedNorms);
 
         List<AgentReviewResult> agentResults = futures.stream()
             .map(CompletableFuture::join)
             .toList();
 
-        return synthesize(request, plan, agentResults);
+        ReviewResult result = synthesize(request, plan, agentResults, retrievedNorms);
+        persistArtifacts(request, plan, retrievedNorms, result);
+        learnNormsFromResult(request, result);
+        return result;
     }
 
     private ReviewPlan createPlan(ReviewRequest request) {
@@ -70,18 +76,19 @@ public class MultiAgentReviewService {
         }
     }
 
-    private List<CompletableFuture<AgentReviewResult>> dispatchTasks(ReviewPlan plan, ReviewRequest request) {
+    private List<CompletableFuture<AgentReviewResult>> dispatchTasks(ReviewPlan plan, ReviewRequest request, List<String> retrievedNorms) {
         List<CompletableFuture<AgentReviewResult>> futures = new ArrayList<>();
+        String titleWithNorms = enrichTitleWithNorms(request.getTitle(), retrievedNorms);
         for (String task : plan.getReviewTasks()) {
             switch (task) {
                 case "security" -> futures.add(CompletableFuture.supplyAsync(() ->
-                    parseAgentResult("security", securityReviewAgent.review(request.getTitle(), request.getDiff()))));
+                    parseAgentResult("security", securityReviewAgent.review(titleWithNorms, request.getDiff()))));
                 case "style" -> futures.add(CompletableFuture.supplyAsync(() ->
-                    parseAgentResult("style", styleReviewAgent.review(request.getTitle(), request.getDiff()))));
+                    parseAgentResult("style", styleReviewAgent.review(titleWithNorms, request.getDiff()))));
                 case "logic" -> futures.add(CompletableFuture.supplyAsync(() ->
-                    parseAgentResult("logic", logicReviewAgent.review(request.getTitle(), request.getDiff()))));
+                    parseAgentResult("logic", logicReviewAgent.review(titleWithNorms, request.getDiff()))));
                 case "performance" -> futures.add(CompletableFuture.supplyAsync(() ->
-                    parseAgentResult("performance", performanceReviewAgent.review(request.getTitle(), request.getDiff()))));
+                    parseAgentResult("performance", performanceReviewAgent.review(titleWithNorms, request.getDiff()))));
                 default -> log.warn("未知审查任务: {}", task);
             }
         }
@@ -112,10 +119,10 @@ public class MultiAgentReviewService {
         }
     }
 
-    private ReviewResult synthesize(ReviewRequest request, ReviewPlan plan, List<AgentReviewResult> results) {
+    private ReviewResult synthesize(ReviewRequest request, ReviewPlan plan, List<AgentReviewResult> results, List<String> retrievedNorms) {
         try {
             String raw = reportSynthesisAgent.synthesize(
-                request.getTitle(),
+                enrichTitleWithNorms(request.getTitle(), retrievedNorms),
                 objectMapper.writeValueAsString(plan),
                 objectMapper.writeValueAsString(results)
             );
@@ -163,5 +170,26 @@ public class MultiAgentReviewService {
             return "";
         }
         return diff.length() <= 10000 ? diff : diff.substring(0, 10000);
+    }
+
+    private String enrichTitleWithNorms(String title, List<String> retrievedNorms) {
+        if (retrievedNorms == null || retrievedNorms.isEmpty()) {
+            return title;
+        }
+        return title + "\n团队历史规范参考：" + String.join("；", retrievedNorms);
+    }
+
+    private void persistArtifacts(ReviewRequest request, ReviewPlan plan, List<String> retrievedNorms, ReviewResult result) {
+        reviewHistoryService.save(request, plan.getRiskLevel(), retrievedNorms, result);
+    }
+
+    private void learnNormsFromResult(ReviewRequest request, ReviewResult result) {
+        if (result.getSuggestions() == null || result.getSuggestions().isEmpty()) {
+            return;
+        }
+        result.getSuggestions().stream()
+            .filter(suggestion -> suggestion != null && !suggestion.isBlank())
+            .limit(3)
+            .forEach(suggestion -> teamNormsMemory.rememberNorm(suggestion, request.getDiff()));
     }
 }
