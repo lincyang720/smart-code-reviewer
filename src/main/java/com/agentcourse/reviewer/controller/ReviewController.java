@@ -2,7 +2,8 @@ package com.agentcourse.reviewer.controller;
 
 import com.agentcourse.reviewer.model.ReviewRequest;
 import com.agentcourse.reviewer.model.ReviewResult;
-import com.agentcourse.reviewer.service.CodeReviewService;
+import com.agentcourse.reviewer.service.GitHubWebhookService;
+import com.agentcourse.reviewer.service.MultiAgentReviewService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -21,7 +22,8 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class ReviewController {
 
-    private final CodeReviewService reviewService;
+    private final MultiAgentReviewService reviewService;
+    private final GitHubWebhookService githubWebhookService;
 
     /**
      * 手动提交 diff 触发审查
@@ -39,6 +41,7 @@ public class ReviewController {
     @PostMapping("/webhook/github")
     public ResponseEntity<String> githubWebhook(
             @RequestHeader(value = "X-GitHub-Event", defaultValue = "") String event,
+            @RequestHeader(value = "X-Hub-Signature-256", required = false) String signature256,
             @RequestBody String payload) {
 
         log.info("收到 GitHub 事件: {}", event);
@@ -47,8 +50,11 @@ public class ReviewController {
             return ResponseEntity.ok("ignored");
         }
 
-        // TODO 阶段二：解析 payload，提取 diff，异步触发审查，回写 PR Comment
-        log.info("PR 事件已接收，待阶段二实现完整处理逻辑");
+        if (!githubWebhookService.verifySignature(payload, signature256)) {
+            return ResponseEntity.status(401).body("invalid signature");
+        }
+
+        githubWebhookService.handlePullRequestEvent(payload);
         return ResponseEntity.ok("received");
     }
 }
