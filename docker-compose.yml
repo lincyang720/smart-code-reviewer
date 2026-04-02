@@ -9,6 +9,9 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-your-api-key-here}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      TEAM_NORMS_PROVIDER: ${TEAM_NORMS_PROVIDER:-chromadb}
+      CHROMADB_BASE_URL: ${CHROMADB_BASE_URL:-http://chromadb:8000}
+      CHROMADB_COLLECTION: ${CHROMADB_COLLECTION:-team-norms}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/reviewdb
       SPRING_DATASOURCE_USERNAME: reviewer
       SPRING_DATASOURCE_PASSWORD: reviewer
@@ -16,6 +19,7 @@ services:
     depends_on:
       - postgres
       - prometheus
+      - chromadb
 
   postgres:
     image: postgres:16
@@ -51,6 +55,15 @@ services:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
 
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: smart-code-reviewer-chromadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - chromadb_data:/chroma/chroma
+
 volumes:
   postgres_data:
   grafana_data:
+  chromadb_data:

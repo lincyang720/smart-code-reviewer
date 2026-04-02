@@ -1,5 +1,6 @@
 package com.agentcourse.reviewer;
 
+import com.agentcourse.reviewer.service.InMemoryTeamNormsMemory;
 import com.agentcourse.reviewer.service.TeamNormsMemory;
 import org.junit.jupiter.api.Test;
 
@@ -11,7 +12,7 @@ class TeamNormsMemoryTest {
 
     @Test
     void shouldRetrieveRelevantNormsByCodeContext() {
-        TeamNormsMemory memory = new TeamNormsMemory();
+        TeamNormsMemory memory = new InMemoryTeamNormsMemory();
         memory.rememberNorm("查询数据库时必须使用 PreparedStatement，禁止字符串拼接 SQL", "SELECT * FROM users WHERE id=" + " + id");
         memory.rememberNorm("Controller 层禁止直接操作 Repository", "controller -> repository");
 

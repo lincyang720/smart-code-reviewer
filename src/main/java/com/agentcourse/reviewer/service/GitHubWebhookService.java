@@ -1,11 +1,11 @@
 package com.agentcourse.reviewer.service;
 
+import com.agentcourse.reviewer.model.ReviewRequest;
+import com.agentcourse.reviewer.model.ReviewResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.kohsuke.github.GHRepository;
-import org.kohsuke.github.GitHub;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 @Slf4j
 @Service
@@ -22,10 +23,9 @@ public class GitHubWebhookService {
     @Value("${app.github.webhook-secret:}")
     private String webhookSecret;
 
-    @Value("${app.github.token:}")
-    private String githubToken;
-
     private final MultiAgentReviewService reviewService;
+    private final GitHubPullRequestService gitHubPullRequestService;
+    private final ReviewCommentFormatter reviewCommentFormatter;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public boolean verifySignature(String payload, String signature256) {
@@ -41,7 +41,7 @@ public class GitHubWebhookService {
             mac.init(new SecretKeySpec(webhookSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             byte[] digest = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
             String actual = "sha256=" + toHex(digest);
-            return actual.equals(signature256);
+            return MessageDigest.isEqual(actual.getBytes(StandardCharsets.UTF_8), signature256.getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             log.error("GitHub 签名校验失败", e);
             return false;
@@ -65,13 +65,22 @@ public class GitHubWebhookService {
             String diffUrl = root.path("pull_request").path("diff_url").asText();
 
             log.info("开始异步处理 PR webhook: {}/{}", repoFullName, prNumber);
-            log.info("当前阶段仅完成Webhook骨架，后续补充diff抓取与自动回评。diffUrl={}", diffUrl);
-
-            if (githubToken != null && !githubToken.isBlank()) {
-                GitHub github = GitHub.connectUsingOAuth(githubToken);
-                GHRepository repository = github.getRepository(repoFullName);
-                repository.getPullRequest(prNumber).comment("Claude Code 已收到该 PR 的审查请求。当前处于阶段二开发中，完整自动审查与评论回写将在后续提交中完善。");
+            String diff = gitHubPullRequestService.fetchDiff(diffUrl);
+            if (diff.isBlank()) {
+                log.warn("PR diff 为空，跳过自动审查。repo={} pr={} diffUrl={}", repoFullName, prNumber, diffUrl);
+                return;
             }
+
+            ReviewRequest request = new ReviewRequest();
+            request.setRepository(repoFullName);
+            request.setPrNumber(prNumber);
+            request.setTitle(title);
+            request.setDescription(body);
+            request.setDiff(diff);
+
+            ReviewResult result = reviewService.review(request);
+            String comment = reviewCommentFormatter.format(result);
+            gitHubPullRequestService.postComment(repoFullName, prNumber, comment);
         } catch (Exception e) {
             log.error("处理 GitHub PR webhook 失败", e);
         }

@@ -43,3 +43,8 @@ app:
   github:
     webhook-secret: ${GITHUB_WEBHOOK_SECRET:}
     token: ${GITHUB_TOKEN:}
+  team-norms:
+    provider: ${TEAM_NORMS_PROVIDER:in-memory}
+    chromadb:
+      base-url: ${CHROMADB_BASE_URL:http://localhost:8000}
+      collection: ${CHROMADB_COLLECTION:team-norms}
